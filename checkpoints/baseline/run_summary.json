@@ -1,0 +1,13 @@
+{
+    "run_name": "baseline",
+    "num_layers": 24,
+    "checkpoint_dir": "./checkpoints/baseline/",
+    "best_val_loss": 0.6933258771896362,
+    "best_val_acc": 50.0,
+    "best_val_eer": 0.0,
+    "gflops": 90.92928798,
+    "macs_str": "45.46 GMac",
+    "params_str": "67.66 M",
+    "avg_latency_ms": 88.1891460006591,
+    "rtf": 0.022047286500164773
+}

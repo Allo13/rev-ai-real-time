@@ -1,0 +1,13 @@
+{
+    "run_name": "run_b_8",
+    "num_layers": 8,
+    "checkpoint_dir": "./checkpoints/run_b_8/",
+    "best_val_loss": 0.6911610066890717,
+    "best_val_acc": 50.0,
+    "best_val_eer": 0.0,
+    "gflops": 64.180835084,
+    "macs_str": "32.09 GMac",
+    "params_str": "34.04 M",
+    "avg_latency_ms": 65.96690999926068,
+    "rtf": 0.01649172749981517
+}

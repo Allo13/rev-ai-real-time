@@ -1,0 +1,41 @@
+[
+    {
+        "run_name": "baseline",
+        "num_layers": 24,
+        "checkpoint_dir": "./checkpoints/baseline/",
+        "best_val_loss": 0.6933258771896362,
+        "best_val_acc": 50.0,
+        "best_val_eer": 0.0,
+        "gflops": 90.92928798,
+        "macs_str": "45.46 GMac",
+        "params_str": "67.66 M",
+        "avg_latency_ms": 88.1891460006591,
+        "rtf": 0.022047286500164773
+    },
+    {
+        "run_name": "run_a_12",
+        "num_layers": 12,
+        "checkpoint_dir": "./checkpoints/run_a_12/",
+        "best_val_loss": 0.6974466443061829,
+        "best_val_acc": 50.0,
+        "best_val_eer": 99.99999999987872,
+        "gflops": 70.867948308,
+        "macs_str": "35.43 GMac",
+        "params_str": "42.44 M",
+        "avg_latency_ms": 68.58835899969563,
+        "rtf": 0.01714708974992391
+    },
+    {
+        "run_name": "run_b_8",
+        "num_layers": 8,
+        "checkpoint_dir": "./checkpoints/run_b_8/",
+        "best_val_loss": 0.6911610066890717,
+        "best_val_acc": 50.0,
+        "best_val_eer": 0.0,
+        "gflops": 64.180835084,
+        "macs_str": "32.09 GMac",
+        "params_str": "34.04 M",
+        "avg_latency_ms": 65.96690999926068,
+        "rtf": 0.01649172749981517
+    }
+]

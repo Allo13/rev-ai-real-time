@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv/
+
+# Weights & Checkpoint models (large binary files)
+weights/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.onnx
+
+# Datasets and Archives
+dataset/*.tar.gz
+dataset/*.zip
+dataset/*.tar
+dataset/DF_2021/
+dataset/LA/
+dataset/LA_2021/
+dataset/LA_sample/
+
+# Logs & temp files
+=1.2.0
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

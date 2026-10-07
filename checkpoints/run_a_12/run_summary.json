@@ -1,0 +1,13 @@
+{
+    "run_name": "run_a_12",
+    "num_layers": 12,
+    "checkpoint_dir": "./checkpoints/run_a_12/",
+    "best_val_loss": 0.6974466443061829,
+    "best_val_acc": 50.0,
+    "best_val_eer": 99.99999999987872,
+    "gflops": 70.867948308,
+    "macs_str": "35.43 GMac",
+    "params_str": "42.44 M",
+    "avg_latency_ms": 68.58835899969563,
+    "rtf": 0.01714708974992391
+}
