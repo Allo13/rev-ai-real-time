@@ -82,13 +82,21 @@ def train_single_ablation_run(
     back_end = FakeMambaClassifier(input_dim=1024, hidden_dim=144, num_mamba_layers=2, num_classes=2)
     model = FakeMambaModel(front_end=front_end, back_end=back_end).to(device)
 
+    # Freeze XLSR front-end weights to save memory and speed up training
+    # Only layer_weights (learnable aggregation) and back_end (Mamba classifier) are trained
+    for param in model.front_end.xlsr.parameters():
+        param.requires_grad = False
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print(f"  Trainable: {trainable/1e6:.2f}M / {total/1e6:.2f}M params (XLSR frozen)")
+
     # 2. Benchmark RTF and GFLOPs before training loop
     print(f"\n--- Profiling Real-Time Performance ({run_name}) ---")
     profile_stats = benchmark_rtf_and_gflops(model, sample_len=64000, device=device)
 
     # 3. Setup Criterion, Optimizer, Scheduler
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     best_val_loss = float('inf')
@@ -228,7 +236,8 @@ def run_all_ablations(
     batch_size: int = 16, 
     lr: float = 1e-4, 
     run_mode: str = "all",
-    device_str: str = "auto"
+    device_str: str = "auto",
+    max_samples: int = None
 ):
     """
     Sequentially executes the three ablation experiments:
@@ -298,6 +307,15 @@ def run_all_ablations(
         num_synth_samples=32
     )
 
+    # Optionally limit dataset size for fast training
+    if max_samples and max_samples < len(train_dataset):
+        from torch.utils.data import Subset
+        indices = list(range(min(max_samples, len(train_dataset))))
+        train_dataset = Subset(train_dataset, indices)
+        val_indices = list(range(min(max_samples // 2, len(val_dataset))))
+        val_dataset = Subset(val_dataset, val_indices)
+        print(f"Dataset limited to {len(train_dataset)} train / {len(val_dataset)} val samples")
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
@@ -358,6 +376,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--run_mode", type=str, default="all", choices=["all", "baseline", "run_a_12", "run_b_8"], help="Ablation run target")
     parser.add_argument("--device", type=str, default="auto", help="Compute device ('cuda', 'cpu', 'auto')")
+    parser.add_argument("--max_samples", type=int, default=None, help="Limit training dataset size for fast runs")
 
     args = parser.parse_args()
     run_all_ablations(
@@ -370,6 +389,7 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         lr=args.lr,
         run_mode=args.run_mode,
-        device_str=args.device
+        device_str=args.device,
+        max_samples=args.max_samples
     )
 

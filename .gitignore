@@ -51,3 +51,14 @@ dataset/LA_sample/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# TensorBoard events
+events.out.tfevents.*
+
+# App runtime
+users.json
+.cache/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

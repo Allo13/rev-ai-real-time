@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0f1923;
+  --bg-secondary: #162030;
+  --bg-card: #1a2636;
+  --bg-elevated: #1e2d3d;
+  --border: rgba(100, 160, 180, 0.15);
+  --accent: #14b8a6;
+  --accent-light: #5eead4;
+  --accent-secondary: #f59e0b;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+/* Backlit glow effects */
+.bklit {
+  position: relative;
+}
+.bklit::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: conic-gradient(from 180deg, #14b8a6, #0d9488, #2dd4bf, #14b8a6);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  z-index: -1;
+  filter: blur(12px);
+}
+.bklit:hover::before,
+.bklit.bklit-active::before {
+  opacity: 0.5;
+}
+
+.bklit-green::before {
+  background: conic-gradient(from 180deg, #22c55e, #10b981, #34d399, #22c55e);
+}
+.bklit-red::before {
+  background: conic-gradient(from 180deg, #ef4444, #f43f5e, #e11d48, #ef4444);
+}
+.bklit-cyan::before {
+  background: conic-gradient(from 180deg, #06b6d4, #22d3ee, #67e8f9, #06b6d4);
+}
+.bklit-indigo::before {
+  background: conic-gradient(from 180deg, #14b8a6, #0ea5e9, #2dd4bf, #14b8a6);
+}
+
+/* Animated gradient border */
+.glow-border {
+  position: relative;
+  overflow: hidden;
+}
+.glow-border::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(135deg, #14b8a6, #0ea5e9, #f59e0b, #14b8a6);
+  background-size: 300% 300%;
+  animation: glow-shift 4s ease infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+@keyframes glow-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* Pulse ring for live recording */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.pulse-ring {
+  animation: pulse-ring 1.5s infinite;
+}
+
+/* Scanning line effect */
+@keyframes scan-line {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.scan-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(20, 184, 166, 0.08), transparent);
+  animation: scan-line 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Glass card */
+.glass {
+  background: rgba(22, 32, 48, 0.8);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(100, 160, 180, 0.15);
+}

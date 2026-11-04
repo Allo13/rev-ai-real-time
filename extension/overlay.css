@@ -1,0 +1,149 @@
+/* RevealAI Floating Overlay — injected on Meet / Zoom pages */
+
+#revealai-overlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  width: 260px;
+  background: #0f1218;
+  border: 1px solid #1e2433;
+  border-radius: 12px;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: #e4e8ef;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  overflow: hidden;
+  user-select: none;
+}
+
+.revealai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #141820;
+  border-bottom: 1px solid #1e2433;
+  cursor: grab;
+}
+.revealai-header:active { cursor: grabbing; }
+
+.revealai-logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+#revealai-minimize {
+  background: none;
+  border: none;
+  color: #7a8599;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+#revealai-minimize:hover { background: #1e2433; color: #e4e8ef; }
+
+.revealai-body {
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Indicator ring */
+.revealai-indicator {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 2.5px solid #1e2433;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color .3s, box-shadow .3s;
+}
+.revealai-indicator.bonafide {
+  border-color: #22c55e;
+  box-shadow: 0 0 20px rgba(34,197,94,.2);
+}
+.revealai-indicator.spoof {
+  border-color: #ef4444;
+  box-shadow: 0 0 20px rgba(239,68,68,.25);
+  animation: revealai-pulse 1s ease infinite;
+}
+
+@keyframes revealai-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(239,68,68,.25); }
+  50%      { box-shadow: 0 0 35px rgba(239,68,68,.4); }
+}
+
+.revealai-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4b5568;
+  transition: background .3s;
+}
+.revealai-dot.bonafide { background: #22c55e; }
+.revealai-dot.spoof { background: #ef4444; }
+
+/* Verdict text */
+.revealai-verdict {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: #7a8599;
+  transition: color .3s;
+}
+.revealai-verdict.bonafide { color: #22c55e; }
+.revealai-verdict.spoof { color: #ef4444; }
+
+.revealai-prob {
+  font-size: 11px;
+  color: #4b5568;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+/* Stats row */
+.revealai-stats {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+.revealai-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 4px;
+  background: #161b26;
+  border-radius: 6px;
+  border: 1px solid #1e2433;
+}
+.revealai-stat-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #4b5568;
+}
+.revealai-stat-value {
+  font-size: 12px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: #e4e8ef;
+}
+
+/* Mini chart */
+#revealai-chart {
+  width: 100%;
+  height: 50px;
+  border-radius: 6px;
+  background: #161b26;
+  margin-top: 4px;
+}

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RevealAI — Real-Time Deepfake Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- ── HEADER ───────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <circle cx="14" cy="14" r="13" stroke="var(--accent)" stroke-width="2"/>
+          <path d="M8 14 L12 18 L20 10" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="logo-text">Reveal<strong>AI</strong></span>
+      </div>
+      <span class="tagline">Audio Deepfake Detection</span>
+    </div>
+    <div class="topbar-right">
+      <span class="sys-badge" id="deviceBadge">loading…</span>
+      <span class="sys-badge" id="modelBadge">—</span>
+    </div>
+  </header>
+
+  <!-- ── MAIN ─────────────────────────────────────────────────── -->
+  <main>
+
+    <!-- MODE TABS -->
+    <div class="tabs">
+      <button class="tab active" data-tab="upload">Upload File</button>
+      <button class="tab" data-tab="live">Live Microphone</button>
+    </div>
+
+    <!-- ── UPLOAD PANEL ────────────────────────────────────────── -->
+    <section class="panel" id="panelUpload">
+      <div class="upload-zone" id="dropZone">
+        <div class="upload-icon">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <path d="M24 32V16M24 16L18 22M24 16L30 22" stroke="var(--text-secondary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 30V36C8 38.2 9.8 40 12 40H36C38.2 40 40 38.2 40 36V30" stroke="var(--text-secondary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <p class="upload-text">Drop an audio file here or <label class="file-label" for="fileInput">browse</label></p>
+        <p class="upload-hint">Supports WAV, FLAC, MP3, OGG — any duration</p>
+        <input type="file" id="fileInput" accept="audio/*" hidden>
+      </div>
+
+      <!-- model selector -->
+      <div class="controls-row">
+        <div class="select-group">
+          <label for="modelSelect">Model</label>
+          <select id="modelSelect">
+            <option value="run_b_8" selected>Run B — 8 Layers (fastest)</option>
+            <option value="run_a_12">Run A — 12 Layers</option>
+            <option value="baseline">Baseline — 24 Layers</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="btnAnalyze" disabled>Analyze</button>
+      </div>
+
+      <!-- progress bar -->
+      <div class="progress-wrap hidden" id="progressWrap">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <span class="progress-label" id="progressLabel">Uploading…</span>
+      </div>
+
+      <!-- results -->
+      <div class="result-card hidden" id="resultCard">
+        <div class="verdict-row">
+          <div class="verdict-badge" id="verdictBadge">—</div>
+          <div class="verdict-meta">
+            <span id="verdictFile">—</span>
+            <span id="verdictDuration">—</span>
+          </div>
+        </div>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="stat-label">Spoof Probability</span>
+            <span class="stat-value" id="statSpoof">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Avg Latency</span>
+            <span class="stat-value" id="statLatency">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Windows Scored</span>
+            <span class="stat-value" id="statWindows">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Real-Time Factor</span>
+            <span class="stat-value" id="statRTF">—</span>
+          </div>
+        </div>
+        <div class="chart-section">
+          <h3>Per-Window Spoof Probability</h3>
+          <canvas id="chartCanvas" height="180"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── LIVE PANEL ──────────────────────────────────────────── -->
+    <section class="panel hidden" id="panelLive">
+      <div class="live-hero">
+        <div class="pulse-ring" id="pulseRing">
+          <div class="pulse-core" id="pulseCore"></div>
+        </div>
+        <div class="live-verdict" id="liveVerdict">READY</div>
+        <div class="live-prob" id="liveProb">—</div>
+      </div>
+
+      <div class="controls-row">
+        <div class="select-group">
+          <label for="liveModelSelect">Model</label>
+          <select id="liveModelSelect">
+            <option value="run_b_8" selected>Run B — 8 Layers</option>
+            <option value="run_a_12">Run A — 12 Layers</option>
+            <option value="baseline">Baseline — 24 Layers</option>
+          </select>
+        </div>
+        <button class="btn btn-accent" id="btnLive">Start Listening</button>
+      </div>
+
+      <div class="live-stats" id="liveStats">
+        <div class="stat"><span class="stat-label">Latency</span><span class="stat-value" id="liveLat">—</span></div>
+        <div class="stat"><span class="stat-label">RTF</span><span class="stat-value" id="liveRTF">—</span></div>
+        <div class="stat"><span class="stat-label">RMS</span><span class="stat-value" id="liveRMS">—</span></div>
+        <div class="stat"><span class="stat-label">Time</span><span class="stat-value" id="liveTime">—</span></div>
+      </div>
+
+      <div class="chart-section">
+        <h3>Live Spoof Probability</h3>
+        <canvas id="liveChart" height="160"></canvas>
+      </div>
+
+      <div class="live-log" id="liveLog"></div>
+    </section>
+
+  </main>
+
+  <!-- ── FOOTER ───────────────────────────────────────────────── -->
+  <footer>
+    <span>RevealAI &mdash; Truncated XLSR-300M + Fake-Mamba SSM</span>
+    <span>Thesis Project &middot; Audio Deepfake Detection</span>
+  </footer>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

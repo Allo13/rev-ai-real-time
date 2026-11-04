@@ -82,22 +82,53 @@ class MockXLSRModel(nn.Module):
         }
 
 
+class HFXLSRWrapper(nn.Module):
+    """
+    Wraps HuggingFace Wav2Vec2Model to expose the same extract_features API
+    as the Fairseq XLSR-300M model, so the rest of the codebase stays unchanged.
+    """
+    def __init__(self, hf_model):
+        super().__init__()
+        self.hf_model = hf_model
+        self.encoder = self.hf_model.encoder
+
+    def extract_features(self, source: torch.Tensor, padding_mask: Optional[torch.Tensor] = None, mask: bool = False) -> Dict[str, Any]:
+        if source.ndim == 1:
+            source = source.unsqueeze(0)
+        # CNN feature extraction + projection
+        extract_features = self.hf_model.feature_extractor(source)
+        extract_features = extract_features.transpose(1, 2)
+        hidden_states, _ = self.hf_model.feature_projection(extract_features)
+        # Apply positional conv embedding + layer norm (same as Wav2Vec2Encoder.forward)
+        position_embeddings = self.encoder.pos_conv_embed(hidden_states)
+        hidden_states = hidden_states + position_embeddings
+        hidden_states = self.encoder.layer_norm(hidden_states)
+        hidden_states = self.encoder.dropout(hidden_states)
+        # Manually iterate encoder layers to collect per-layer hidden states
+        inner_states = [hidden_states]
+        h = hidden_states
+        for layer in self.encoder.layers:
+            h = layer(h)
+            inner_states.append(h)
+        return {
+            "x": inner_states[-1],
+            "inner_states": inner_states,
+        }
+
+
 def load_xlsr_300m(checkpoint_path: Optional[str] = None):
     """
-    Loads Fairseq XLSR-300M model from checkpoint file if provided or available in default locations,
-    otherwise instantiates MockXLSRModel architecture for testing.
-    
-    Default search locations:
-    1. checkpoint_path parameter
-    2. ./weights/xlsr_53_56k.pt
-    3. ./models/xlsr_53_56k.pt
+    Loads XLSR-300M via (in order of preference):
+    1. Fairseq checkpoint from disk (requires fairseq)
+    2. HuggingFace transformers (facebook/wav2vec2-xls-r-300m, auto-downloaded)
+    3. MockXLSRModel fallback for offline testing
     """
+    # --- Try Fairseq first ---
     default_locations = [
         checkpoint_path,
         os.path.join(".", "weights", "xlsr_53_56k.pt"),
         os.path.join(".", "models", "xlsr_53_56k.pt"),
     ]
-    
     target_path = None
     for loc in default_locations:
         if loc and os.path.exists(loc):
@@ -112,17 +143,29 @@ def load_xlsr_300m(checkpoint_path: Optional[str] = None):
             xlsr = model[0]
             xlsr.eval()
             return xlsr
+        except ImportError:
+            print("[load_xlsr_300m] fairseq not installed, trying HuggingFace transformers...")
         except Exception as e:
-            print(f"[load_xlsr_300m] Warning: Failed to load Fairseq model from {target_path}: {e}")
-            print("[load_xlsr_300m] Falling back to MockXLSRModel architecture.")
-            return MockXLSRModel(num_layers=24, embed_dim=1024)
-    else:
-        if checkpoint_path:
-            print(f"[load_xlsr_300m] Notice: Specified checkpoint_path '{checkpoint_path}' does not exist.")
-        else:
-            print("[load_xlsr_300m] Notice: No checkpoint_path specified and ./weights/xlsr_53_56k.pt not found.")
-        print("[load_xlsr_300m] Utilizing MockXLSRModel architecture for standalone testing/verification.")
-        return MockXLSRModel(num_layers=24, embed_dim=1024)
+            print(f"[load_xlsr_300m] Fairseq load failed ({e}), trying HuggingFace transformers...")
+
+    # --- Try HuggingFace transformers ---
+    try:
+        from transformers import Wav2Vec2Model
+        model_id = "facebook/wav2vec2-xls-r-300m"
+        print(f"[load_xlsr_300m] Loading XLSR-300M via HuggingFace: {model_id}")
+        print("[load_xlsr_300m] (First run downloads ~1.2 GB of weights, cached afterwards)")
+        hf_model = Wav2Vec2Model.from_pretrained(model_id)
+        hf_model.eval()
+        print(f"[load_xlsr_300m] Loaded {model_id} successfully ({sum(p.numel() for p in hf_model.parameters())/1e6:.0f}M params)")
+        return HFXLSRWrapper(hf_model)
+    except ImportError:
+        print("[load_xlsr_300m] transformers not installed.")
+    except Exception as e:
+        print(f"[load_xlsr_300m] HuggingFace load failed: {e}")
+
+    # --- Fallback to mock ---
+    print("[load_xlsr_300m] Falling back to MockXLSRModel (untrained, for testing only).")
+    return MockXLSRModel(num_layers=24, embed_dim=1024)
 
 
 

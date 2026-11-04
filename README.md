@@ -161,6 +161,22 @@ python train_ablation.py --epochs 5 --batch_size 8 --run_mode all
 
 ---
 
+### 4. Live (Real-Time) Analysis
+
+`realtime_detect.py` streams audio from the microphone (or a file paced at real-time speed), scores a sliding 4 s window every 0.5 s, smooths the spoof probability (EMA), skips silence, and reports per-window latency and RTF plus a session summary.
+
+```bash
+# Live microphone, using the 8-layer model (./checkpoints/run_b_8/best_model.pt)
+python realtime_detect.py --source mic --run run_b_8
+
+# Stream a file at real-time speed and save a per-window CSV log
+python realtime_detect.py --source file --file sample.flac --log_csv live_log.csv
+```
+
+Useful flags: `--window`, `--hop`, `--threshold`, `--ema`, `--silence_rms`, `--mic_device`, `--duration`, `--checkpoint`, `--xlsr_path`, `--no_pacing`.
+
+---
+
 ## 📊 Performance Benchmark & Thesis Metrics Output
 
 After running experiments, output checkpoints and metrics are saved to:
