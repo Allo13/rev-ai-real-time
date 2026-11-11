@@ -14,6 +14,9 @@ Endpoints:
 """
 
 import os
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "4")
+os.environ.setdefault("MKL_NUM_THREADS", "4")
 import sys
 import time
 import json
@@ -33,9 +36,14 @@ from models.fake_mamba import FakeMambaClassifier, FakeMambaModel
 from dataset.asvspoof_loader import TARGET_SR
 
 RUN_CONFIGS = {
-    "baseline":  {"num_layers": 24, "checkpoint": "./checkpoints/baseline/best_model.pt"},
-    "run_a_12":  {"num_layers": 12, "checkpoint": "./checkpoints/run_a_12/best_model.pt"},
-    "run_b_8":   {"num_layers": 8,  "checkpoint": "./checkpoints/run_b_8/best_model.pt"},
+    # Legacy XLSR+Mamba models
+    "baseline":  {"num_layers": 24, "checkpoint": "./checkpoints/baseline/best_model.pt", "arch": "xlsr_mamba"},
+    "run_a_12":  {"num_layers": 12, "checkpoint": "./checkpoints/run_a_12/best_model.pt", "arch": "xlsr_mamba"},
+    "run_b_8":   {"num_layers": 8,  "checkpoint": "./checkpoints/run_b_8/best_model.pt", "arch": "xlsr_mamba"},
+    # v2: wav2vec2-base + AASIST (fast, real-time)
+    "v2_fast":   {"num_layers": 12, "checkpoint": "./checkpoints/v2_fast/best_model.pt", "arch": "w2v2_aasist"},
+    # v2: XLSR-300M + AASIST (accurate)
+    "v2_accurate": {"num_layers": 12, "checkpoint": "./checkpoints/v2_accurate/best_model.pt", "arch": "xlsr_aasist"},
 }
 
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
@@ -66,37 +74,72 @@ _model_lock = threading.Lock()
 def get_device():
     global _device
     if _device is None:
-        _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
+            if free_mem >= 2.0:
+                _device = torch.device("cuda")
+            else:
+                print(f"[Reveal AI] GPU has only {free_mem:.1f}GB free, using CPU")
+                _device = torch.device("cpu")
+        else:
+            _device = torch.device("cpu")
     return _device
 
 
-def load_model(run_name="run_b_8", xlsr_path=None):
+def load_model(run_name="v2_fast", xlsr_path=None):
     global _model, _active_run
     with _model_lock:
         if _model is not None and _active_run == run_name:
             return _model
 
+        import gc
         device = get_device()
         cfg = RUN_CONFIGS[run_name]
         num_layers = cfg["num_layers"]
         ckpt_path = cfg["checkpoint"]
+        arch = cfg.get("arch", "xlsr_mamba")
 
         state = None
         if os.path.exists(ckpt_path):
             state = torch.load(ckpt_path, map_location="cpu")
             num_layers = state.get("num_layers", num_layers)
 
-        base_xlsr = load_xlsr_300m(checkpoint_path=xlsr_path)
-        front_end = TruncatedXLSR(base_xlsr_model=base_xlsr, num_layers=num_layers)
-        back_end = FakeMambaClassifier(input_dim=1024, hidden_dim=144, num_mamba_layers=2, num_classes=2)
-        model = FakeMambaModel(front_end=front_end, back_end=back_end)
+        if arch == "xlsr_mamba":
+            base_xlsr = load_xlsr_300m(checkpoint_path=xlsr_path)
+            front_end = TruncatedXLSR(base_xlsr_model=base_xlsr, num_layers=num_layers)
+            del base_xlsr; gc.collect()
+            back_end = FakeMambaClassifier(input_dim=1024, hidden_dim=144, num_mamba_layers=2, num_classes=2)
+            model = FakeMambaModel(front_end=front_end, back_end=back_end)
+
+        elif arch == "w2v2_aasist":
+            from models.ssl_frontend import load_wav2vec2_base, TruncatedSSL
+            from models.aasist_backend import AASISTBackend, SSLAntiSpoofModel
+            base = load_wav2vec2_base()
+            front_end = TruncatedSSL(base, num_layers=num_layers)
+            del base; gc.collect()
+            back_end = AASISTBackend(input_dim=768, hidden_dim=160, num_heads=4, num_classes=2)
+            model = SSLAntiSpoofModel(front_end, back_end)
+
+        elif arch == "xlsr_aasist":
+            from models.ssl_frontend import load_xlsr_large, TruncatedSSL
+            from models.aasist_backend import AASISTBackend, SSLAntiSpoofModel
+            base = load_xlsr_large()
+            front_end = TruncatedSSL(base, num_layers=num_layers)
+            del base; gc.collect()
+            back_end = AASISTBackend(input_dim=1024, hidden_dim=256, num_heads=4, num_classes=2)
+            model = SSLAntiSpoofModel(front_end, back_end)
+
+        else:
+            raise ValueError(f"Unknown architecture: {arch}")
 
         if state is not None:
             model.load_state_dict(state["model_state_dict"])
+            del state; gc.collect()
 
         model = model.to(device).eval()
+        gc.collect()
         with torch.no_grad():
-            model(torch.zeros(1, TARGET_SR * 4, device=device))
+            model(torch.zeros(1, TARGET_SR, device=device))
 
         _model = model
         _active_run = run_name
@@ -162,9 +205,9 @@ def token():
 
 @app.route("/api/status")
 def api_status():
-    device = get_device()
+    device_str = str(_device) if _device else ("cuda" if torch.cuda.is_available() else "cpu")
     return jsonify({
-        "device": str(device),
+        "device": device_str,
         "cuda_available": torch.cuda.is_available(),
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "active_model": _active_run,
@@ -209,7 +252,7 @@ def detect():
     waveform = waveform.astype(np.float32)
     audio_hash = hashlib.sha256(waveform.tobytes()).hexdigest()
 
-    model = load_model("run_b_8")
+    model = load_model("v2_fast")
     device = get_device()
 
     total_samples = len(waveform)
@@ -304,7 +347,7 @@ def forensic_report():
 @sock.route("/ws/stream")
 def ws_stream(ws):
     authenticated = False
-    model_obj = load_model("run_b_8")
+    model_obj = load_model("v2_fast")
     device = get_device()
 
     buffer = np.zeros(0, dtype=np.float32)
@@ -374,24 +417,31 @@ def ws_stream(ws):
 
 @sock.route("/ws/live")
 def ws_live(ws):
-    model_obj = load_model("run_b_8")
+    print("[ws/live] New connection")
+    model_obj = load_model("v2_fast")
     device = get_device()
+    print("[ws/live] Model ready, listening for audio...")
 
     buffer = np.zeros(0, dtype=np.float32)
-    ema = None
-    ema_alpha = 0.6
     stream_time = 0.0
+    chunks_received = 0
     window_samples = TARGET_SR * 4
+    VERDICT_PERIOD = 10.0
+    scores_window = []
+    last_verdict_time = 0.0
 
     while True:
         try:
-            data = ws.receive(timeout=10)
-        except Exception:
+            data = ws.receive(timeout=30)
+        except Exception as e:
+            print(f"[ws/live] Receive error after {chunks_received} chunks: {e}")
             break
         if data is None:
+            print(f"[ws/live] Connection closed by client after {chunks_received} chunks")
             break
 
         if isinstance(data, str):
+            print(f"[ws/live] Got text message: {data[:100]}")
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "config":
@@ -401,35 +451,66 @@ def ws_live(ws):
             continue
 
         chunk = np.frombuffer(data, dtype=np.float32)
+        chunks_received += 1
         buffer = np.concatenate([buffer, chunk])
         stream_time += len(chunk) / TARGET_SR
+
+        if chunks_received <= 3:
+            rms_chunk = float(np.sqrt(np.mean(chunk ** 2)))
+            print(f"[ws/live] Chunk #{chunks_received}: {len(chunk)} samples, RMS={rms_chunk:.5f}, buffer={len(buffer)}")
 
         if len(buffer) < TARGET_SR:
             continue
 
         window = buffer[-window_samples:] if len(buffer) >= window_samples else buffer
 
-        rms = float(np.sqrt(np.mean(chunk ** 2)))
-        if rms < 0.005:
+        rms = float(np.sqrt(np.mean(window ** 2)))
+        if rms < 0.001:
             ws.send(json.dumps({"type": "silence", "time": round(stream_time, 2), "rms": round(rms, 5)}))
+            if chunks_received <= 10:
+                print(f"[ws/live] Silence (RMS={rms:.5f})")
             continue
 
         result = score_audio(window, model_obj, device)
         sp = result["spoof_prob"]
-        ema = sp if ema is None else ema_alpha * sp + (1 - ema_alpha) * ema
+        scores_window.append(sp)
 
-        ws.send(json.dumps({
+        time_since_verdict = stream_time - last_verdict_time
+        if time_since_verdict < VERDICT_PERIOD:
+            progress_pct = min(100, int(time_since_verdict / VERDICT_PERIOD * 100))
+            ws.send(json.dumps({
+                "type": "analyzing",
+                "progress": progress_pct,
+                "time": round(stream_time, 2),
+                "samples_collected": len(scores_window),
+            }))
+            continue
+
+        avg_spoof = float(np.mean(scores_window))
+        max_spoof = float(np.max(scores_window))
+        median_spoof = float(np.median(scores_window))
+        verdict = "SPOOF" if avg_spoof >= 0.5 else "BONAFIDE"
+
+        verdict_data = {
             "type": "result",
-            "spoof_prob": round(sp, 4),
-            "bonafide_prob": round(result["bonafide_prob"], 4),
-            "verdict": "SPOOF" if sp >= 0.5 else "BONAFIDE",
+            "spoof_prob": round(avg_spoof, 4),
+            "bonafide_prob": round(1.0 - avg_spoof, 4),
+            "verdict": verdict,
             "latency_ms": round(result["latency"] * 1000, 2),
             "rtf": round(result["latency"] / (len(window) / TARGET_SR), 6),
             "time": round(stream_time, 2),
-            "smoothed": round(ema, 4),
+            "max_spoof": round(max_spoof, 4),
+            "median_spoof": round(median_spoof, 4),
+            "num_samples": len(scores_window),
             "rms": round(rms, 5),
-        }))
+        }
+        ws.send(json.dumps(verdict_data))
+        print(f"[ws/live] VERDICT after {len(scores_window)} samples → {verdict} (avg={avg_spoof:.3f}, max={max_spoof:.3f}, median={median_spoof:.3f})")
 
+        scores_window = []
+        last_verdict_time = stream_time
+
+    print(f"[ws/live] Session ended. Total chunks: {chunks_received}, stream time: {stream_time:.1f}s")
     ws.close()
 
 
@@ -443,6 +524,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"[Reveal AI] Pre-loading model '{args.model}'...")
-    load_model(args.model)
+    try:
+        load_model(args.model)
+        print(f"[Reveal AI] Model loaded successfully!")
+    except Exception as e:
+        print(f"[Reveal AI] Model pre-load failed ({e}), will retry on first request")
     print(f"[Reveal AI] Server starting at http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug)

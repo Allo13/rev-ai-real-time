@@ -2,6 +2,8 @@
  * RevealAI Popup Script
  *
  * Controls start/stop of tab audio capture and shows live results.
+ * The popup gets the stream ID directly (user gesture context) and
+ * passes it to the background → offscreen pipeline.
  */
 
 const BACKEND_URL = "http://127.0.0.1:5000";
@@ -14,11 +16,9 @@ const resultSection = document.getElementById("resultSection");
 
 let isCapturing = false;
 
-// Check backend and tab on popup open
 init();
 
 async function init() {
-  // Check backend health
   let backendOk = false;
   try {
     const res = await fetch(BACKEND_URL + "/api/status", { signal: AbortSignal.timeout(3000) });
@@ -35,7 +35,6 @@ async function init() {
 
   statusDot.classList.add("connected");
 
-  // Detect platform from current tab
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && tab.url) {
     if (tab.url.includes("meet.google.com")) {
@@ -53,7 +52,6 @@ async function init() {
     }
   }
 
-  // Check if already capturing
   chrome.runtime.sendMessage({ action: "getStatus" }, (res) => {
     if (res && res.isCapturing) {
       isCapturing = true;
@@ -66,8 +64,6 @@ async function init() {
 }
 
 btnToggle.addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
   if (isCapturing) {
     chrome.runtime.sendMessage({ action: "stopCapture" }, () => {
       isCapturing = false;
@@ -75,17 +71,34 @@ btnToggle.addEventListener("click", async () => {
       btnToggle.className = "btn btn-start";
       resultSection.classList.remove("visible");
     });
-  } else {
-    chrome.runtime.sendMessage({ action: "startCapture", tabId: tab.id }, (res) => {
-      if (res && res.ok) {
-        isCapturing = true;
-        btnToggle.textContent = "Stop Detection";
-        btnToggle.className = "btn btn-stop";
-        resultSection.classList.add("visible");
-      } else {
-        statusText.textContent = "Capture failed: " + (res?.error || "unknown");
-      }
+    return;
+  }
+
+  // Get stream ID directly from popup (preserves user gesture context)
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  try {
+    const streamId = await chrome.tabCapture.getMediaStreamId({
+      targetTabId: tab.id
     });
+
+    // Pass stream ID to background to create offscreen and start processing
+    chrome.runtime.sendMessage(
+      { action: "startWithStream", tabId: tab.id, streamId },
+      (res) => {
+        if (res && res.ok) {
+          isCapturing = true;
+          btnToggle.textContent = "Stop Detection";
+          btnToggle.className = "btn btn-stop";
+          resultSection.classList.add("visible");
+        } else {
+          statusText.textContent = "Failed: " + (res?.error || "unknown");
+        }
+      }
+    );
+  } catch (e) {
+    statusText.textContent = "Capture failed: " + e.message;
+    statusText.style.fontSize = "10px";
   }
 });
 
@@ -95,20 +108,47 @@ chrome.runtime.onMessage.addListener((msg) => {
 
   resultSection.classList.add("visible");
 
-  if (msg.type === "silence") {
-    document.getElementById("resultVerdict").textContent = "SILENCE";
+  if (msg.type === "info") {
+    document.getElementById("resultVerdict").textContent = "LOADING...";
     document.getElementById("resultVerdict").className = "result-verdict";
+    statusText.textContent = msg.message || "Loading...";
+    statusText.style.fontSize = "10px";
+    return;
+  }
+
+  if (msg.type === "error") {
+    document.getElementById("resultVerdict").textContent = "ERROR";
+    document.getElementById("resultVerdict").className = "result-verdict";
+    statusText.textContent = msg.error || "Unknown error";
+    statusText.style.fontSize = "10px";
+    return;
+  }
+
+  if (msg.type === "silence") {
+    document.getElementById("resultVerdict").textContent = "LISTENING...";
+    document.getElementById("resultVerdict").className = "result-verdict";
+    document.getElementById("rTime").textContent = (msg.time || 0).toFixed(0) + "s";
+    return;
+  }
+
+  if (msg.type === "analyzing") {
+    document.getElementById("resultVerdict").textContent = "ANALYZING... " + (msg.progress || 0) + "%";
+    document.getElementById("resultVerdict").className = "result-verdict";
+    document.getElementById("rTime").textContent = (msg.time || 0).toFixed(0) + "s";
+    document.getElementById("rSpoof").textContent = "—";
+    document.getElementById("rLat").textContent = "—";
+    document.getElementById("rRTF").textContent = "—";
     return;
   }
 
   if (msg.type === "result") {
-    const isSpoof = msg.smoothed >= 0.5;
+    const isSpoof = msg.spoof_prob >= 0.5;
     const verdict = isSpoof ? "SPOOF" : "BONAFIDE";
     const cls = isSpoof ? "spoof" : "bonafide";
 
     document.getElementById("resultVerdict").textContent = verdict;
     document.getElementById("resultVerdict").className = "result-verdict " + cls;
-    document.getElementById("rSpoof").textContent = (msg.smoothed * 100).toFixed(1) + "%";
+    document.getElementById("rSpoof").textContent = (msg.spoof_prob * 100).toFixed(1) + "%";
     document.getElementById("rLat").textContent = msg.latency_ms.toFixed(0) + "ms";
     document.getElementById("rRTF").textContent = msg.rtf.toFixed(3);
     document.getElementById("rTime").textContent = msg.time.toFixed(0) + "s";

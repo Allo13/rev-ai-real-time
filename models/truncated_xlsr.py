@@ -154,7 +154,9 @@ def load_xlsr_300m(checkpoint_path: Optional[str] = None):
         model_id = "facebook/wav2vec2-xls-r-300m"
         print(f"[load_xlsr_300m] Loading XLSR-300M via HuggingFace: {model_id}")
         print("[load_xlsr_300m] (First run downloads ~1.2 GB of weights, cached afterwards)")
-        hf_model = Wav2Vec2Model.from_pretrained(model_id)
+        import gc
+        hf_model = Wav2Vec2Model.from_pretrained(model_id, low_cpu_mem_usage=True)
+        gc.collect()
         hf_model.eval()
         print(f"[load_xlsr_300m] Loaded {model_id} successfully ({sum(p.numel() for p in hf_model.parameters())/1e6:.0f}M params)")
         return HFXLSRWrapper(hf_model)
@@ -184,8 +186,8 @@ class TruncatedXLSR(nn.Module):
         super().__init__()
         self.num_layers = num_layers
         
-        # 1. Deepcopy base model to prevent in-place mutation across different ablation runs
-        self.xlsr = copy.deepcopy(base_xlsr_model)
+        # Use the model directly to save memory (deepcopy doubles RAM for 1.2GB model)
+        self.xlsr = base_xlsr_model
         
         # 2. Physically slice the encoder layers
         if hasattr(self.xlsr, 'encoder') and hasattr(self.xlsr.encoder, 'layers'):
