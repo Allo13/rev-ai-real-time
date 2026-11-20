@@ -8,23 +8,32 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Cell,
 } from 'recharts'
 import { getHistory, clearHistory, type HistoryEntry } from '../services/history'
+import { MODEL_LABELS } from '../services/detectionService'
 
-const EER_RESULTS = [
-  { model: 'XLSR + Fake-Mamba (8L)', eer: 0.00, prod: true },
-  { model: 'XLSR + Fake-Mamba (12L)', eer: 0.00, prod: false },
-  { model: 'XLSR + Fake-Mamba (24L)', eer: 0.00, prod: false },
+const MODEL_INFO = {
+  name: 'XLS-R 300M + AASIST (Tak et al.)',
+  architecture: 'SSL front-end (XLS-R 300M, 24 layers, 1024-dim) + Original AASIST backend',
+  dataset: 'ASVspoof 2019 LA',
+  source: 'TakHemlata/SSL_Anti-spoofing',
+  publishedEER_LA: '0.82%',
+  publishedEER_DF: '2.85%',
+  sslParams: '315M',
+  backendParams: '0.4M',
+}
+
+const DATASET_STATS = [
+  { split: 'Train', bonafide: 2580, spoofed: 22800, attacks: 'A01–A06' },
+  { split: 'Dev', bonafide: 2548, spoofed: 22296, attacks: 'A01–A06' },
+  { split: 'Eval', bonafide: 7355, spoofed: 63882, attacks: 'A07–A19' },
 ]
 
-const PERF_RESULTS = [
-  { config: '8 Layers (Deployed)', params: '0.44M', latency: 84, rtf: 0.021 },
-  { config: '12 Layers', params: '0.44M', latency: 120, rtf: 0.030 },
-  { config: '24 Layers (Full)', params: '0.44M', latency: 210, rtf: 0.053 },
-]
-
-const CONFUSION = { TP: 100, FN: 0, FP: 0, TN: 100 }
+const DATASET_CHART = DATASET_STATS.map((s) => ({
+  split: s.split,
+  Bonafide: s.bonafide,
+  Spoofed: s.spoofed,
+}))
 
 function AnimatedStat({ value, label, accent }: { value: string; label: string; accent: string }) {
   const ref = useRef<HTMLParagraphElement>(null)
@@ -42,10 +51,10 @@ function AnimatedStat({ value, label, accent }: { value: string; label: string; 
           if (ref.current) {
             const v = parseFloat(ref.current.textContent || '0')
             ref.current.textContent = value.includes('%')
-              ? `${value.includes('.') ? v.toFixed(2) : Math.round(v)}%`
-              : value.includes('ms')
-              ? `${Math.round(v)}ms`
-              : v.toFixed(3)
+              ? `${v.toFixed(2)}%`
+              : value.includes('M')
+              ? `${v.toFixed(1)}M`
+              : v.toFixed(2)
           }
         },
         complete: () => {
@@ -83,122 +92,85 @@ export default function ResultsTab() {
   return (
     <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-8">
       <motion.div variants={fadeUp}>
-        <h2 className="text-xl font-semibold text-white mb-1">Model Performance</h2>
+        <h2 className="text-xl font-semibold text-white mb-1">Model & Performance</h2>
         <p className="text-sm text-gray-400">
-          Ablation study on ASVspoof 2019 LA — Layer-Truncated XLSR-300M + Fake-Mamba SSM.
+          Pretrained XLS-R 300M + AASIST — Tak et al. (2022), trained on ASVspoof 2019 LA.
         </p>
       </motion.div>
 
+      {/* Key stats */}
       <motion.div variants={fadeUp} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <AnimatedStat value="0.00%" label="EER (8-layer model)" accent="text-teal-300" />
-        <AnimatedStat value="100%" label="Validation accuracy" accent="text-green-400" />
-        <AnimatedStat value="84ms" label="Inference latency" accent="text-green-400" />
-        <AnimatedStat value="0.021" label="Real-Time Factor" accent="text-green-400" />
+        <AnimatedStat value="0.82%" label="Published EER (LA)" accent="text-teal-300" />
+        <AnimatedStat value="2.85%" label="Published EER (DF)" accent="text-cyan-300" />
+        <AnimatedStat value="315M" label="SSL front-end params" accent="text-indigo-300" />
+        <AnimatedStat value="0.4M" label="AASIST backend params" accent="text-purple-300" />
       </motion.div>
 
-      <motion.div variants={fadeUp} className="overflow-x-auto rounded-xl border border-gray-700/50 glow-border">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-800/80 text-gray-400">
-            <tr>
-              {['Model', 'EER ↓', 'Role'].map((h) => (
-                <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800/50">
-            {EER_RESULTS.map((row, i) => (
-              <motion.tr
-                key={row.model}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.3 + i * 0.05 }}
-                className={`transition-colors ${row.prod ? 'bg-teal-950/30' : 'bg-gray-900/40 hover:bg-gray-800/40'}`}
-              >
-                <td className="px-4 py-3 font-medium text-white">{row.model}</td>
-                <td className="px-4 py-3 font-mono text-teal-300">{row.eer.toFixed(2)}%</td>
-                <td className="px-4 py-3">
-                  {row.prod ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-teal-900/50 text-teal-300 border border-teal-700/50">
-                      ★ Deployed
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-500">baseline</span>
-                  )}
-                </td>
-              </motion.tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Model info */}
+      <motion.div variants={fadeUp} className="glass rounded-xl p-6 space-y-3">
+        <p className="text-sm font-medium text-gray-300">Active Model</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[
+            { k: 'Architecture', v: MODEL_INFO.architecture },
+            { k: 'Training Dataset', v: MODEL_INFO.dataset },
+            { k: 'Source', v: MODEL_INFO.source },
+            { k: 'SSL Params', v: MODEL_INFO.sslParams },
+            { k: 'Backend Params', v: MODEL_INFO.backendParams },
+          ].map(({ k, v }) => (
+            <div key={k} className="bg-gray-900/50 rounded-lg p-3">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">{k}</p>
+              <p className="text-sm text-gray-200 mt-0.5 font-mono">{v}</p>
+            </div>
+          ))}
+        </div>
       </motion.div>
 
-      <motion.div variants={fadeUp} className="glass rounded-xl p-6">
-        <p className="text-sm text-gray-400 mb-4">Equal Error Rate by model (lower is better)</p>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={EER_RESULTS} margin={{ left: -20 }}>
-            <XAxis dataKey="model" tick={{ fill: '#9ca3af', fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={50} />
-            <YAxis tick={{ fill: '#9ca3af', fontSize: 11 }} unit="%" />
-            <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: '0.75rem' }} labelStyle={{ color: '#f3f4f6' }} formatter={(v: number) => [`${v}%`, 'EER']} />
-            <Bar dataKey="eer" radius={[6, 6, 0, 0]}>
-              {EER_RESULTS.map((entry) => (
-                <Cell key={entry.model} fill={entry.prod ? '#14b8a6' : '#374151'} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </motion.div>
-
+      {/* Dataset breakdown */}
       <motion.div variants={fadeUp} className="glass rounded-xl p-6 space-y-4">
-        <p className="text-sm text-gray-400">Layer truncation — inference speed vs. full model</p>
+        <p className="text-sm font-medium text-gray-300">ASVspoof 2019 LA Dataset</p>
         <div className="overflow-x-auto rounded-lg border border-gray-700/50">
           <table className="w-full text-sm">
             <thead className="bg-gray-800/60 text-gray-400">
               <tr>
-                {['Configuration', 'Params', 'Latency', 'RTF'].map((h) => (
+                {['Split', 'Bonafide', 'Spoofed', 'Total', 'Attacks', 'Ratio'].map((h) => (
                   <th key={h} className="px-4 py-2 text-left font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/50">
-              {PERF_RESULTS.map((row) => (
-                <tr key={row.config} className="bg-gray-900/30">
-                  <td className="px-4 py-2 text-gray-300 font-medium">{row.config}</td>
-                  <td className="px-4 py-2 font-mono text-gray-400">{row.params}</td>
-                  <td className="px-4 py-2 font-mono text-teal-300">{row.latency}ms</td>
-                  <td className="px-4 py-2 font-mono text-green-400">{row.rtf}</td>
+              {DATASET_STATS.map((row) => (
+                <tr key={row.split} className="bg-gray-900/30">
+                  <td className="px-4 py-2 text-gray-300 font-medium">{row.split}</td>
+                  <td className="px-4 py-2 font-mono text-green-400">{row.bonafide.toLocaleString()}</td>
+                  <td className="px-4 py-2 font-mono text-red-400">{row.spoofed.toLocaleString()}</td>
+                  <td className="px-4 py-2 font-mono text-gray-300">{(row.bonafide + row.spoofed).toLocaleString()}</td>
+                  <td className="px-4 py-2 font-mono text-gray-400">{row.attacks}</td>
+                  <td className="px-4 py-2 font-mono text-yellow-400">1:{(row.spoofed / row.bonafide).toFixed(1)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <p className="text-xs text-gray-600">
-          RTF &lt; 1.0 means real-time capable. Lower = faster. 8 layers achieves 2.5× speedup over full model.
+          Imbalanced ~1:9 ratio. Eval uses 13 unseen attack types (A07–A19) to test generalization.
         </p>
       </motion.div>
 
+      {/* Dataset chart */}
       <motion.div variants={fadeUp} className="glass rounded-xl p-6">
-        <p className="text-sm text-gray-400 mb-4">Confusion matrix — XLSR-300M + Fake-Mamba (8 layers)</p>
-        <div className="grid grid-cols-2 gap-2 max-w-xs">
-          {[
-            { label: 'TP', value: CONFUSION.TP, color: 'bg-green-900/60 text-green-300 border-green-700/30' },
-            { label: 'FN', value: CONFUSION.FN, color: 'bg-red-900/30 text-red-400 border-red-700/30' },
-            { label: 'FP', value: CONFUSION.FP, color: 'bg-yellow-900/30 text-yellow-400 border-yellow-700/30' },
-            { label: 'TN', value: CONFUSION.TN, color: 'bg-green-900/60 text-green-300 border-green-700/30' },
-          ].map(({ label, value, color }, i) => (
-            <motion.div
-              key={label}
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.5 + i * 0.1, type: 'spring', bounce: 0.3 }}
-              className={`${color} border rounded-xl p-4 text-center`}
-            >
-              <p className="text-xs opacity-70">{label}</p>
-              <p className="text-2xl font-bold font-mono">{value}</p>
-            </motion.div>
-          ))}
-        </div>
-        <div className="mt-2 text-xs text-gray-600">Rows: Actual · Columns: Predicted</div>
+        <p className="text-sm text-gray-400 mb-4">Dataset split distribution</p>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={DATASET_CHART} margin={{ left: -20 }}>
+            <XAxis dataKey="split" tick={{ fill: '#9ca3af', fontSize: 12 }} />
+            <YAxis tick={{ fill: '#9ca3af', fontSize: 11 }} />
+            <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: '0.75rem' }} labelStyle={{ color: '#f3f4f6' }} />
+            <Bar dataKey="Bonafide" fill="#22c55e" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="Spoofed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </motion.div>
 
+      {/* Detection history */}
       <motion.div variants={fadeUp} className="glass rounded-xl p-6">
         <div className="mb-4 flex items-center justify-between">
           <p className="text-sm text-gray-400">Your recent detections</p>
@@ -241,7 +213,7 @@ export default function ResultsTab() {
                       </span>
                     </td>
                     <td className="px-4 py-2 font-mono text-gray-300">{Math.round(h.confidence * 100)}%</td>
-                    <td className="px-4 py-2 font-mono text-gray-500 text-xs">{h.model}</td>
+                    <td className="px-4 py-2 font-mono text-gray-500 text-xs">{MODEL_LABELS[h.model] ?? h.model}</td>
                   </motion.tr>
                 ))}
               </tbody>

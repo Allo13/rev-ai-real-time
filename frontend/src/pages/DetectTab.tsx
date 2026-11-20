@@ -8,8 +8,9 @@ import {
   type DetectionResult,
   type Explanation,
   type ModelInfo,
+  type TimelineSegment,
 } from '../services/detectionService'
-import { generateReport } from '../services/forensicsService'
+import { generateReport, type ForensicReport } from '../services/forensicsService'
 import { addHistory } from '../services/history'
 import { ApiError } from '../config/apiConfig'
 
@@ -269,6 +270,172 @@ function AudioSpectrogram({ file }: { file: File }) {
   )
 }
 
+function Timeline({ segments, duration }: { segments: TimelineSegment[]; duration: number }) {
+  if (segments.length === 0) return null
+  const maxProb = Math.max(...segments.map((s) => s.spoof_prob))
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.15 }}
+      className="bg-gray-900/80 border border-amber-500/20 rounded-xl p-5 space-y-3"
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-amber-300 font-medium">Detection Timeline</p>
+        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-gray-900 border border-gray-700 text-gray-400">
+          {segments.length} segment{segments.length !== 1 ? 's' : ''} · {duration.toFixed(1)}s
+        </span>
+      </div>
+
+      {/* Bar chart */}
+      <div className="relative">
+        <div className="flex items-end gap-px h-24">
+          {segments.map((seg, i) => {
+            const pct = Math.max(3, seg.spoof_prob * 100)
+            const isFlagged = seg.spoof_prob >= 0.5
+            return (
+              <motion.div
+                key={i}
+                initial={{ height: 0 }}
+                animate={{ height: `${pct}%` }}
+                transition={{ delay: i * 0.02, duration: 0.4 }}
+                className={`flex-1 rounded-t-sm cursor-pointer relative group ${
+                  isFlagged ? 'bg-red-500' : 'bg-emerald-500'
+                }`}
+                style={{ opacity: 0.4 + (seg.spoof_prob / Math.max(maxProb, 0.01)) * 0.6 }}
+                title={`${seg.start_s.toFixed(1)}s–${seg.end_s.toFixed(1)}s: ${(seg.spoof_prob * 100).toFixed(1)}% spoof`}
+              >
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                  {seg.start_s.toFixed(1)}–{seg.end_s.toFixed(1)}s
+                  <br />
+                  Spoof: {(seg.spoof_prob * 100).toFixed(1)}%
+                </div>
+              </motion.div>
+            )
+          })}
+        </div>
+        {/* Threshold line */}
+        <div className="absolute left-0 right-0 border-t border-dashed border-yellow-500/50" style={{ bottom: '50%' }}>
+          <span className="absolute -top-3 right-0 text-[9px] text-yellow-500/70 font-mono">50% threshold</span>
+        </div>
+      </div>
+
+      <div className="flex justify-between text-[10px] font-mono text-gray-600">
+        <span>0.0s</span>
+        <span>{(duration / 2).toFixed(1)}s</span>
+        <span>{duration.toFixed(1)}s</span>
+      </div>
+
+      {/* Legend */}
+      <div className="flex gap-4 text-[11px] text-gray-500">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block" /> Flagged (≥50%)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Clean (&lt;50%)
+        </span>
+      </div>
+    </motion.div>
+  )
+}
+
+function ForensicReportView({ report, onClose }: { report: ForensicReport; onClose: () => void }) {
+  const v = report.verdict
+  const s = report.analysis_summary
+  const c = report.chain_of_custody
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="bg-gray-900/90 border border-teal-500/30 rounded-2xl p-6 space-y-5"
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Forensic Analysis Report</h3>
+          <p className="text-xs text-gray-500 mt-0.5">{report.standard}</p>
+        </div>
+        <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors text-lg leading-none">×</button>
+      </div>
+
+      {/* Meta */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { k: 'Report ID', v: report.report_id },
+          { k: 'Generated', v: new Date(report.generated_at).toLocaleString() },
+          { k: 'Analyst', v: report.analyst },
+          { k: 'Duration', v: `${report.duration_s.toFixed(1)}s` },
+        ].map(({ k, v: val }) => (
+          <div key={k} className="glass rounded-lg p-2.5">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider">{k}</p>
+            <p className="text-xs text-white font-mono truncate mt-0.5">{val}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Verdict */}
+      <div className={`rounded-xl p-4 border ${v.label === 'fake' ? 'border-red-500/40 bg-red-500/5' : 'border-green-500/40 bg-green-500/5'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Verdict</p>
+            <p className={`text-2xl font-bold uppercase ${v.label === 'fake' ? 'text-red-400' : 'text-green-400'}`}>
+              {v.label}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-gray-500">Confidence</p>
+            <p className={`text-2xl font-mono font-bold ${v.label === 'fake' ? 'text-red-400' : 'text-green-400'}`}>
+              {(v.confidence * 100).toFixed(1)}%
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Analysis summary */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-gray-300">Analysis Summary</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { k: 'Segments', v: String(s.total_segments_analyzed) },
+            { k: 'Peak Spoof', v: `${(s.peak_spoof_probability * 100).toFixed(1)}%` },
+            { k: 'Avg Spoof', v: `${(s.avg_spoof_probability * 100).toFixed(1)}%` },
+            { k: 'Flagged', v: `${s.segments_flagged} / ${s.total_segments_analyzed}` },
+          ].map(({ k, v: val }) => (
+            <div key={k} className="glass rounded-lg p-2.5">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">{k}</p>
+              <p className="text-sm text-white font-mono mt-0.5">{val}</p>
+            </div>
+          ))}
+        </div>
+        {s.peak_segment && (
+          <p className="text-xs text-gray-500">
+            Peak at {s.peak_segment.start_s.toFixed(1)}–{s.peak_segment.end_s.toFixed(1)}s
+          </p>
+        )}
+      </div>
+
+      {/* Methodology */}
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium text-gray-300">Methodology</p>
+        <p className="text-xs text-gray-500 leading-relaxed">{report.methodology}</p>
+      </div>
+
+      {/* Chain of custody */}
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium text-gray-300">Chain of Custody</p>
+        <div className="bg-gray-950/50 rounded-lg p-3 font-mono text-[11px] text-gray-400 space-y-1 break-all">
+          <p>Audio SHA-256: {c.audio_hash_sha256}</p>
+          <p>Analysis time: {c.analysis_timestamp}</p>
+          <p>Model: {c.model_version}</p>
+          <p>Report hash: {c.report_hash}</p>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
 export default function DetectTab() {
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<DetectionResult | null>(null)
@@ -276,6 +443,7 @@ export default function DetectTab() {
   const [explain, setExplain] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reportBusy, setReportBusy] = useState(false)
+  const [report, setReport] = useState<ForensicReport | null>(null)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [model, setModel] = useState('classical')
   const [dragOver, setDragOver] = useState(false)
@@ -300,6 +468,7 @@ export default function DetectTab() {
     setLoading(true)
     setError(null)
     setResult(null)
+    setReport(null)
     try {
       const data = await detectAudio(file, explain, model)
       setResult(data)
@@ -319,8 +488,8 @@ export default function DetectTab() {
     if (!result) return
     setReportBusy(true)
     try {
-      const report = await generateReport(result)
-      window.open(report.report_url, '_blank')
+      const r = await generateReport(result)
+      setReport(r)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Could not generate the report.')
     } finally {
@@ -470,7 +639,7 @@ export default function DetectTab() {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {[
-                { k: 'Model', v: result.model },
+                { k: 'Model', v: MODEL_LABELS[result.model] ?? result.model },
                 { k: 'Latency', v: `${result.latency_ms.toFixed(1)}ms` },
                 { k: 'Audio Hash', v: result.audio_hash.slice(0, 8) + '...' },
               ].map(({ k, v }, i) => (
@@ -499,10 +668,14 @@ export default function DetectTab() {
                   : 'This audio is consistent with genuine human speech.'}
               </p>
               <p className="text-xs text-gray-500">
-                Scored by the {result.model} detector (Layer-Truncated XLSR-300M front-end +
-                Fake-Mamba SSM back-end). Uploaded audio is deleted after analysis.
+                Scored by the {MODEL_LABELS[result.model] ?? result.model} detector.
+                Uploaded audio is deleted after analysis.
               </p>
             </motion.div>
+
+            {result.timeline && result.timeline.length > 1 && (
+              <Timeline segments={result.timeline} duration={result.duration_s ?? 0} />
+            )}
 
             {result.explanation && (
               <AttributionView explanation={result.explanation} label={result.label} />
@@ -515,8 +688,14 @@ export default function DetectTab() {
               disabled={reportBusy}
               className="w-full border border-gray-700 bg-gray-800/80 hover:bg-gray-700/80 disabled:opacity-50 text-gray-200 font-medium py-2.5 px-6 rounded-xl transition-colors text-sm"
             >
-              {reportBusy ? 'Generating...' : 'Download forensic PDF report'}
+              {reportBusy ? 'Generating...' : 'Generate Forensic Report'}
             </motion.button>
+
+            <AnimatePresence>
+              {report && (
+                <ForensicReportView report={report} onClose={() => setReport(null)} />
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>

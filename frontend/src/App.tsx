@@ -2,13 +2,10 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import anime from 'animejs'
 import DetectTab from './pages/DetectTab'
-import LiveTab from './pages/LiveTab'
-import GenerateTab from './pages/GenerateTab'
-import VerifyTab from './pages/VerifyTab'
 import ResultsTab from './pages/ResultsTab'
 import LoginControl from './components/LoginControl'
 
-type Tab = 'detect' | 'live' | 'generate' | 'verify' | 'results'
+type Tab = 'detect' | 'results'
 
 const pageVariants = {
   enter: { opacity: 0, y: 20, filter: 'blur(8px)' },
@@ -125,9 +122,6 @@ export default function App() {
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'detect', label: 'Detect', icon: 'M9 12l2 2 4-4' },
-    { id: 'live', label: 'Live', icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m-4-1h8' },
-    { id: 'generate', label: 'Test Samples', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
-    { id: 'verify', label: 'Record', icon: 'M12 14l9-5-9-5-9 5 9 5zm0 7l9-5-9-5-9 5 9 5z' },
     { id: 'results', label: 'Results', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
   ]
 
@@ -207,9 +201,6 @@ export default function App() {
               transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             >
               {activeTab === 'detect' && <DetectTab />}
-              {activeTab === 'live' && <LiveTab />}
-              {activeTab === 'generate' && <GenerateTab />}
-              {activeTab === 'verify' && <VerifyTab />}
               {activeTab === 'results' && <ResultsTab />}
             </motion.div>
           </AnimatePresence>

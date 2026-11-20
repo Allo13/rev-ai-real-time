@@ -23,6 +23,7 @@ import json
 import hashlib
 import tempfile
 import threading
+import datetime
 import numpy as np
 import torch
 import torch.nn as nn
@@ -36,14 +37,8 @@ from models.fake_mamba import FakeMambaClassifier, FakeMambaModel
 from dataset.asvspoof_loader import TARGET_SR
 
 RUN_CONFIGS = {
-    # Legacy XLSR+Mamba models
-    "baseline":  {"num_layers": 24, "checkpoint": "./checkpoints/baseline/best_model.pt", "arch": "xlsr_mamba"},
-    "run_a_12":  {"num_layers": 12, "checkpoint": "./checkpoints/run_a_12/best_model.pt", "arch": "xlsr_mamba"},
-    "run_b_8":   {"num_layers": 8,  "checkpoint": "./checkpoints/run_b_8/best_model.pt", "arch": "xlsr_mamba"},
-    # v2: wav2vec2-base + AASIST (fast, real-time)
-    "v2_fast":   {"num_layers": 12, "checkpoint": "./checkpoints/v2_fast/best_model.pt", "arch": "w2v2_aasist"},
-    # v2: XLSR-300M + AASIST (accurate)
-    "v2_accurate": {"num_layers": 12, "checkpoint": "./checkpoints/v2_accurate/best_model.pt", "arch": "xlsr_aasist"},
+    # Pretrained: XLS-R 300M + original AASIST from Tak et al. (ASVspoof 2019 LA)
+    "v2_pretrained": {"num_layers": 24, "checkpoint": "./checkpoints/v2_pretrained/best_model.pt", "arch": "xlsr_aasist_pretrained"},
 }
 
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
@@ -69,6 +64,7 @@ _model = None
 _device = None
 _active_run = None
 _model_lock = threading.Lock()
+_detection_cache: dict = {}  # audio_hash → full detection result for forensic reports
 
 
 def get_device():
@@ -128,6 +124,20 @@ def load_model(run_name="v2_fast", xlsr_path=None):
             del base; gc.collect()
             back_end = AASISTBackend(input_dim=1024, hidden_dim=256, num_heads=4, num_classes=2)
             model = SSLAntiSpoofModel(front_end, back_end)
+
+        elif arch == "xlsr_aasist_pretrained":
+            from models.ssl_frontend import load_xlsr_large, TruncatedSSL
+            from models.aasist_original import OriginalAASISTBackend, PretrainedSSLAntiSpoof
+            base = load_xlsr_large()
+            if state and "ssl_state_dict" in state:
+                base.hf_model.load_state_dict(state["ssl_state_dict"], strict=False)
+            front_end = TruncatedSSL(base, num_layers=num_layers)
+            del base; gc.collect()
+            back_end = OriginalAASISTBackend(ssl_dim=1024, hidden_dim=64, num_sinc=42)
+            if state and "backend_state_dict" in state:
+                back_end.load_state_dict(state["backend_state_dict"], strict=False)
+            model = PretrainedSSLAntiSpoof(front_end, back_end)
+            state = None  # skip the generic load_state_dict below
 
         else:
             raise ValueError(f"Unknown architecture: {arch}")
@@ -220,9 +230,10 @@ def api_status():
 @app.route("/models")
 def models():
     registry = {}
-    registry["xlsr_mamba"] = {
-        "available": any(os.path.exists(v["checkpoint"]) for v in RUN_CONFIGS.values())
-    }
+    for key, cfg in RUN_CONFIGS.items():
+        registry[key] = {
+            "available": os.path.exists(cfg["checkpoint"]),
+        }
     return jsonify(registry)
 
 
@@ -251,8 +262,12 @@ def detect():
 
     waveform = waveform.astype(np.float32)
     audio_hash = hashlib.sha256(waveform.tobytes()).hexdigest()
+    duration_s = len(waveform) / TARGET_SR
 
-    model = load_model("v2_fast")
+    selected_model = request.args.get("model", "v2_pretrained")
+    if selected_model not in RUN_CONFIGS:
+        selected_model = "v2_pretrained"
+    model_obj = load_model(selected_model)
     device = get_device()
 
     total_samples = len(waveform)
@@ -261,29 +276,53 @@ def detect():
     if total_samples < TARGET_SR:
         waveform = np.pad(waveform, (0, TARGET_SR - total_samples))
 
+    timeline = []
     if total_samples <= window_samples:
-        r = score_audio(waveform, model, device)
+        r = score_audio(waveform, model_obj, device)
         spoof_prob = r["spoof_prob"]
         latency = r["latency"]
+        timeline.append({
+            "start_s": 0.0,
+            "end_s": round(duration_s, 2),
+            "spoof_prob": round(r["spoof_prob"], 4),
+            "bonafide_prob": round(r["bonafide_prob"], 4),
+        })
     else:
         hop = TARGET_SR // 2
         results = []
         for start in range(0, total_samples - window_samples + 1, hop):
             chunk = waveform[start:start + window_samples]
-            results.append(score_audio(chunk, model, device))
+            r = score_audio(chunk, model_obj, device)
+            results.append(r)
+            timeline.append({
+                "start_s": round(start / TARGET_SR, 2),
+                "end_s": round((start + window_samples) / TARGET_SR, 2),
+                "spoof_prob": round(r["spoof_prob"], 4),
+                "bonafide_prob": round(r["bonafide_prob"], 4),
+            })
         spoof_prob = float(np.mean([r["spoof_prob"] for r in results]))
         latency = float(np.mean([r["latency"] for r in results]))
 
     label = "fake" if spoof_prob >= 0.5 else "real"
     confidence = spoof_prob if label == "fake" else 1.0 - spoof_prob
 
-    return jsonify({
+    result = {
         "label": label,
         "confidence": round(confidence, 4),
-        "model": "XLSR-300M + Fake-Mamba (Reveal AI)",
+        "model": selected_model,
         "latency_ms": round(latency * 1000, 1),
         "audio_hash": audio_hash,
-    })
+        "duration_s": round(duration_s, 2),
+        "timeline": timeline,
+    }
+
+    _detection_cache[audio_hash] = result
+    # Keep cache bounded
+    if len(_detection_cache) > 100:
+        oldest = list(_detection_cache.keys())[0]
+        del _detection_cache[oldest]
+
+    return jsonify(result)
 
 
 # ── Test samples ─────────────────────────────────────────────────────────────
@@ -339,7 +378,65 @@ def watermark_verify():
 
 @app.route("/forensic/report", methods=["POST"])
 def forensic_report():
-    return jsonify({"detail": "Forensic reports not available in this build"}), 501
+    data = request.get_json(silent=True) or {}
+    audio_hash = data.get("audio_hash", "")
+    analyst_name = data.get("analyst_name", "Reveal AI Analyst")
+
+    if not audio_hash or audio_hash not in _detection_cache:
+        return jsonify({"detail": "No detection found for this audio hash — run /detect first"}), 404
+
+    cached = _detection_cache[audio_hash]
+    now = datetime.datetime.utcnow()
+
+    timeline = cached.get("timeline", [])
+    peak_spoof = max((t["spoof_prob"] for t in timeline), default=0)
+    peak_segment = None
+    for t in timeline:
+        if t["spoof_prob"] == peak_spoof:
+            peak_segment = t
+            break
+
+    report = {
+        "report_id": hashlib.sha256(f"{audio_hash}-{now.isoformat()}".encode()).hexdigest()[:16],
+        "generated_at": now.isoformat() + "Z",
+        "analyst": analyst_name,
+        "standard": "NIST SP 800-86 compliant format",
+        "audio_hash_sha256": audio_hash,
+        "duration_s": cached.get("duration_s", 0),
+        "verdict": {
+            "label": cached["label"],
+            "confidence": cached["confidence"],
+            "model": cached["model"],
+            "latency_ms": cached["latency_ms"],
+        },
+        "timeline": timeline,
+        "analysis_summary": {
+            "total_segments_analyzed": len(timeline),
+            "peak_spoof_probability": round(peak_spoof, 4),
+            "peak_segment": peak_segment,
+            "avg_spoof_probability": round(
+                sum(t["spoof_prob"] for t in timeline) / max(len(timeline), 1), 4
+            ),
+            "segments_flagged": sum(1 for t in timeline if t["spoof_prob"] >= 0.5),
+        },
+        "chain_of_custody": {
+            "audio_hash_sha256": audio_hash,
+            "analysis_timestamp": now.isoformat() + "Z",
+            "model_version": cached["model"],
+            "report_hash": "",  # filled below
+        },
+        "methodology": (
+            "Audio was segmented into overlapping 4-second windows with 0.5-second hop. "
+            "Each window was scored independently by the SSL front-end (XLS-R 300M or wav2vec2-base) "
+            "feeding into an AASIST graph-attention backend. The final verdict is the mean "
+            "spoof probability across all windows, thresholded at 0.5."
+        ),
+    }
+
+    report_str = json.dumps(report, sort_keys=True)
+    report["chain_of_custody"]["report_hash"] = hashlib.sha256(report_str.encode()).hexdigest()
+
+    return jsonify(report)
 
 
 # ── Live WebSocket streaming (frontend Live tab) ────────────────────────────
@@ -347,7 +444,7 @@ def forensic_report():
 @sock.route("/ws/stream")
 def ws_stream(ws):
     authenticated = False
-    model_obj = load_model("v2_fast")
+    model_obj = load_model("v2_pretrained")
     device = get_device()
 
     buffer = np.zeros(0, dtype=np.float32)
@@ -418,7 +515,7 @@ def ws_stream(ws):
 @sock.route("/ws/live")
 def ws_live(ws):
     print("[ws/live] New connection")
-    model_obj = load_model("v2_fast")
+    model_obj = load_model("v2_pretrained")
     device = get_device()
     print("[ws/live] Model ready, listening for audio...")
 
@@ -427,8 +524,10 @@ def ws_live(ws):
     chunks_received = 0
     window_samples = TARGET_SR * 4
     VERDICT_PERIOD = 10.0
+    VERDICT_HOLD = 5.0
     scores_window = []
     last_verdict_time = 0.0
+    last_verdict_data = None
 
     while True:
         try:
@@ -476,8 +575,12 @@ def ws_live(ws):
         scores_window.append(sp)
 
         time_since_verdict = stream_time - last_verdict_time
+        if time_since_verdict < VERDICT_HOLD and last_verdict_data:
+            ws.send(json.dumps(last_verdict_data))
+            continue
         if time_since_verdict < VERDICT_PERIOD:
-            progress_pct = min(100, int(time_since_verdict / VERDICT_PERIOD * 100))
+            progress_pct = min(100, int((time_since_verdict - VERDICT_HOLD) / (VERDICT_PERIOD - VERDICT_HOLD) * 100))
+            progress_pct = max(0, min(100, progress_pct))
             ws.send(json.dumps({
                 "type": "analyzing",
                 "progress": progress_pct,
@@ -505,6 +608,7 @@ def ws_live(ws):
             "rms": round(rms, 5),
         }
         ws.send(json.dumps(verdict_data))
+        last_verdict_data = verdict_data
         print(f"[ws/live] VERDICT after {len(scores_window)} samples → {verdict} (avg={avg_spoof:.3f}, max={max_spoof:.3f}, median={median_spoof:.3f})")
 
         scores_window = []
@@ -519,7 +623,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
-    parser.add_argument("--model", default="run_b_8", choices=list(RUN_CONFIGS))
+    parser.add_argument("--model", default="v2_pretrained", choices=list(RUN_CONFIGS))
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 

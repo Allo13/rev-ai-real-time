@@ -17,12 +17,21 @@ export type Explanation = {
   narrative?: string | null
 }
 
+export type TimelineSegment = {
+  start_s: number
+  end_s: number
+  spoof_prob: number
+  bonafide_prob: number
+}
+
 export type DetectionResult = {
   label: 'real' | 'fake'
   confidence: number
   model: string
   latency_ms: number
   audio_hash: string
+  duration_s?: number
+  timeline?: TimelineSegment[]
   explanation?: Explanation | null
 }
 
@@ -33,7 +42,12 @@ export type ModelInfo = {
 
 /** Human-readable labels for the detector model keys. */
 export const MODEL_LABELS: Record<string, string> = {
-  xlsr_mamba: 'XLSR-300M + Fake-Mamba SSM (Reveal AI)',
+  baseline: 'XLSR-300M + Fake-Mamba 24L (Baseline)',
+  run_a_12: 'XLSR-300M + Fake-Mamba 12L',
+  run_b_8: 'XLSR-300M + Fake-Mamba 8L',
+  v2_fast: 'wav2vec2-base + AASIST (Fast)',
+  v2_accurate: 'XLS-R 300M + AASIST (Accurate)',
+  v2_pretrained: 'XLS-R 300M + AASIST Pretrained (Tak et al.)',
 }
 
 /** Fetch the detector registry and its per-model checkpoint availability. */
